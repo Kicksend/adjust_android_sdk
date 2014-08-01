@@ -1,7 +1,7 @@
 ## Summary
 
-This is the Android SDK of adjust.io™. You can read more about adjust.io™ at
-adjust.io.
+This is the Android SDK of adjust™. You can read more about adjust™ at
+adjust.com.
 
 ## Basic Installation
 
@@ -133,7 +133,7 @@ for **each** Activity of your app:
 - Add the `import` statement at the top of the file.
 - In your Activity's `onResume` method call `Adjust.onResume`. Create the
   method if needed.
-- In your Activity's `orPause` method call `Adjust.onPause`. Create the
+- In your Activity's `onPause` method call `Adjust.onPause`. Create the
   method if needed.
 
 After these steps your activity should look like this:
@@ -247,6 +247,8 @@ Every time your app tries to track a session, an event or some revenue, you can
 be notified about the success of that operation and receive additional
 information about the current install.
 
+Please make sure to consider [applicable attribution data policies.][attribution-data]
+
 The simplest way is to create a single anonymous listener for these notifications.
 
 - Open the source file of your main activity, find its `onResume` method and
@@ -286,6 +288,7 @@ interface:
     ActivityKind.SESSION
     ActivityKind.EVENT
     ActivityKind.REVENUE
+    ActivityKind.REATTRIBUTION
     ```
 
 - `String getActivityKindString()` human readable version of the activity kind. Possible values:
@@ -294,6 +297,7 @@ interface:
     session
     event
     revenue
+    reattribution
     ```
 
 - `boolean wasSuccess()` indicates whether or not the tracking attempt was
@@ -306,6 +310,14 @@ interface:
   request failed or response could not be parsed.
 - `String getTrackerName()` the tracker name of the current install. Is `null` if
   request failed or response could not be parsed.
+- `String getNetwork()` the network grouping level of the current install. Is `null` if
+  request failed, unavailable, or response could not be parsed.
+- `String getCampaign()` the campaign grouping level of the current install. Is `null` if
+  request failed, unavailable or response could not be parsed.
+- `String getAdgroup()` the ad group grouping level of the current install. Is `null` if
+  request failed, unavailable or response could not be parsed.
+- `String getCreative()` the creative grouping level of the current install. Is `null` if
+  request failed, unavailable or response could not be parsed.
 
 ### 12. Enable event buffering
 
@@ -318,8 +330,43 @@ event buffering by adding the following line to your Adjust settings in your
 <meta-data android:name="AdjustEventBuffering" android:value="true" />
 ```
 
-[adjust.io]:   http://adjust.io
-[dashboard]:   http://adjust.io
+### 13. Disable tracking
+
+You can disable the adjust SDK from tracking by invoking the method
+`setEnabled` with the enabled parameter as `false`. This setting is remembered
+between sessions, but it can only be activated after the first session.
+
+```java
+Adjust.setEnabled(false);
+```
+
+You can verify if the adjust SDK is currently active with the method
+`isEnabled`. It is always possible to activate the adjust SDK by invoking
+`setEnable` with the enabled parameter as `true`.
+
+### 14. Handle deep linking
+
+You can also set up the adjust SDK to read deep links that come to your app. We
+will only read the data that is injected by adjust tracker URLs. This is
+essential if you are planning to run retargeting or re-engagement campaigns
+with deep links.
+
+For each activity that accepts deep links, find the `onCreate` method and add
+the folowing call to adjust:
+
+```java
+protected void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+
+    Intent intent = getIntent();
+    Uri data = intent.getData();
+    Adjust.appWillOpenUrl(data);
+    //...
+}
+```
+
+[adjust.com]:   http://adjust.com
+[dashboard]:   http://adjust.com
 [releases]:    https://github.com/adjust/adjust_android_sdk/releases
 [project]:     https://raw.github.com/adjust/adjust_sdk/master/Resources/android/project.png
 [android]:     https://raw.github.com/adjust/adjust_sdk/master/Resources/android/android.png
@@ -332,14 +379,14 @@ event buffering by adding the following line to your Adjust settings in your
 [activity]:    https://raw.github.com/adjust/adjust_sdk/master/Resources/android/activity4.png
 [log]:         https://raw.github.com/adjust/adjust_sdk/master/Resources/android/log4.png
 [referrer]:    doc/referrer.md
-
+[attribution-data]: https://github.com/adjust/sdks/blob/master/doc/attribution-data.md
 
 ## License
 
 The adjust SDK is licensed under the MIT License.
 
-Copyright (c) 2012-2013 adeven GmbH,
-http://www.adeven.com
+Copyright (c) 2012-2013 adjust GmbH,
+http://www.adjust.com
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in

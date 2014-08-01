@@ -3,7 +3,7 @@
 //  Adjust
 //
 //  Created by Christian Wellenbrock on 2013-06-25.
-//  Copyright (c) 2013 adeven. All rights reserved.
+//  Copyright (c) 2013 adjust GmbH. All rights reserved.
 //  See the file MIT-LICENSE for copying permission.
 //
 
@@ -24,7 +24,8 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OptionalDataException;
 import java.lang.ref.WeakReference;
-import java.util.Locale;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -32,10 +33,13 @@ import java.util.concurrent.TimeUnit;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.pm.ResolveInfo;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -49,18 +53,20 @@ public class ActivityHandler extends HandlerThread {
     private static long SESSION_INTERVAL;
     private static long SUBSESSION_INTERVAL;
     private static final String TIME_TRAVEL = "Time travel!";
+    private static final String ADJUST_PREFIX = "adjust_";
 
-    private final  SessionHandler           sessionHandler;
+    private        SessionHandler           sessionHandler;
     private        IPackageHandler          packageHandler;
     private        OnFinishedListener       onFinishedListener;
     private        ActivityState            activityState;
-    private final  Logger                   logger;
+    private        Logger                   logger;
     private static ScheduledExecutorService timer;
-    private final  Context                  context;
+    private        Context                  context;
     private        String                   environment;
     private        String                   defaultTracker;
     private        boolean                  eventBuffering;
     private        boolean                  dropOfflineActivities;
+    private        boolean                  enabled;
 
     private String appToken;
     private String macSha1;
@@ -72,42 +78,43 @@ public class ActivityHandler extends HandlerThread {
 
     public ActivityHandler(Activity activity) {
         super(LOGTAG, MIN_PRIORITY);
-        setDaemon(true);
-        start();
-        TIMER_INTERVAL = AdjustFactory.getTimerInterval();
-        SESSION_INTERVAL = AdjustFactory.getSessionInterval();
-        SUBSESSION_INTERVAL = AdjustFactory.getSubsessionInterval();
-        sessionHandler = new SessionHandler(getLooper(), this);
-        context = activity.getApplicationContext();
-        clientSdk = Constants.CLIENT_SDK;
 
-        logger = AdjustFactory.getLogger();
+        initActivityHandler(activity);
 
         Message message = Message.obtain();
         message.arg1 = SessionHandler.INIT_BUNDLE;
         sessionHandler.sendMessage(message);
     }
 
-    public ActivityHandler(Activity activity, String appToken, String environment, boolean eventBuffering)  {
+    public ActivityHandler(Activity activity, String appToken,
+            String environment, String logLevel, boolean eventBuffering) {
         super(LOGTAG, MIN_PRIORITY);
+
+        initActivityHandler(activity);
+
+        this.environment = environment;
+        this.eventBuffering = eventBuffering;
+        logger.setLogLevelString(logLevel);
+
+        Message message = Message.obtain();
+        message.arg1 = SessionHandler.INIT_PRESET;
+        message.obj = appToken;
+        sessionHandler.sendMessage(message);
+    }
+
+    private void initActivityHandler(Activity activity) {
         setDaemon(true);
         start();
+
         TIMER_INTERVAL = AdjustFactory.getTimerInterval();
         SESSION_INTERVAL = AdjustFactory.getSessionInterval();
         SUBSESSION_INTERVAL = AdjustFactory.getSubsessionInterval();
         sessionHandler = new SessionHandler(getLooper(), this);
         context = activity.getApplicationContext();
         clientSdk = Constants.CLIENT_SDK;
+        enabled = true;
 
         logger = AdjustFactory.getLogger();
-
-        this.appToken = appToken;
-        this.environment = environment;
-        this.eventBuffering = eventBuffering;
-
-        Message message = Message.obtain();
-        message.arg1 = SessionHandler.INIT_PRESET;
-        sessionHandler.sendMessage(message);
     }
 
     public void setSdkPrefix(String sdkPrefx) {
@@ -131,7 +138,7 @@ public class ActivityHandler extends HandlerThread {
     }
 
     public void trackEvent(String eventToken, Map<String, String> parameters) {
-        PackageBuilder builder = new PackageBuilder();
+        PackageBuilder builder = new PackageBuilder(context);
         builder.setEventToken(eventToken);
         builder.setCallbackParameters(parameters);
 
@@ -142,7 +149,7 @@ public class ActivityHandler extends HandlerThread {
     }
 
     public void trackRevenue(double amountInCents, String eventToken, Map<String, String> parameters) {
-        PackageBuilder builder = new PackageBuilder();
+        PackageBuilder builder = new PackageBuilder(context);
         builder.setAmountInCents(amountInCents);
         builder.setEventToken(eventToken);
         builder.setCallbackParameters(parameters);
@@ -153,8 +160,8 @@ public class ActivityHandler extends HandlerThread {
         sessionHandler.sendMessage(message);
     }
 
-    public void finishedTrackingActivity(final ResponseData responseData) {
-        if (onFinishedListener == null) {
+    public void finishedTrackingActivity(final ResponseData responseData, final String deepLink) {
+        if (onFinishedListener == null && deepLink == null) {
             return;
         }
 
@@ -163,12 +170,39 @@ public class ActivityHandler extends HandlerThread {
             @Override
             public void run() {
                 try {
-                    onFinishedListener.onFinishedTracking(responseData);
+                    runDelegateMain(responseData);
+                    launchDeepLinkMain(deepLink);
                 } catch (NullPointerException e) {
                 }
             }
         };
         handler.post(runnable);
+    }
+
+    public void setEnabled(Boolean enabled) {
+        this.enabled = enabled;
+        if (checkActivityState(activityState))
+            activityState.enabled = enabled;
+        if (enabled) {
+            this.trackSubsessionStart();
+        } else {
+            this.trackSubsessionEnd();
+        }
+    }
+
+    public Boolean isEnabled() {
+        if (checkActivityState(activityState)) {
+            return activityState.enabled;
+        } else {
+            return this.enabled;
+        }
+    }
+
+    public void readOpenUrl(Uri url) {
+        Message message = Message.obtain();
+        message.arg1 = SessionHandler.DEEP_LINK;
+        message.obj = url;
+        sessionHandler.sendMessage(message);
     }
 
     private static final class SessionHandler extends Handler {
@@ -178,6 +212,8 @@ public class ActivityHandler extends HandlerThread {
         private static final int END         = 72650;
         private static final int EVENT       = 72660;
         private static final int REVENUE     = 72670;
+        private static final int DEEP_LINK   = 72680;
+
 
         private final WeakReference<ActivityHandler> sessionHandlerReference;
 
@@ -197,10 +233,11 @@ public class ActivityHandler extends HandlerThread {
 
             switch (message.arg1) {
                 case INIT_BUNDLE:
-                    sessionHandler.initInternal(true);
+                    sessionHandler.initInternal(true, null);
                     break;
                 case INIT_PRESET:
-                    sessionHandler.initInternal(false);
+                    String appToken = (String) message.obj;
+                    sessionHandler.initInternal(false, appToken);
                     break;
                 case START:
                     sessionHandler.startInternal();
@@ -216,37 +253,48 @@ public class ActivityHandler extends HandlerThread {
                     PackageBuilder revenueBuilder = (PackageBuilder) message.obj;
                     sessionHandler.trackRevenueInternal(revenueBuilder);
                     break;
+                case DEEP_LINK:
+                    Uri url = (Uri) message.obj;
+                    sessionHandler.readOpenUrlInternal(url);
+                    break;
             }
         }
     }
 
-    private void initInternal(boolean fromBundle) {
+    private void initInternal(boolean fromBundle, String appToken) {
         if (fromBundle) {
-            processApplicationBundle();
+            appToken = processApplicationBundle();
         } else {
             setEnvironment(environment);
             setEventBuffering(eventBuffering);
         }
 
-        if (!canInit()) {
+        if (!canInit(appToken)) {
             return;
         }
 
-        String macAddress = Util.getMacAddress(context);
-        String macShort = macAddress.replaceAll(":", "");
-
-        macSha1 = Util.sha1(macAddress);
-        macShortMd5 = Util.md5(macShort);
+        this.appToken = appToken;
         androidId = Util.getAndroidId(context);
         fbAttributionId = Util.getAttributionId(context);
         userAgent = Util.getUserAgent(context);
+
+        String playAdId = Util.getPlayAdId(context);
+        if (playAdId == null) {
+            logger.info("Unable to get Google Play Services Advertising ID at start time");
+        }
+
+        if  (!Util.isGooglePlayServicesAvailable(context)) {
+            String macAddress = Util.getMacAddress(context);
+            macSha1 = Util.getMacSha1(macAddress);
+            macShortMd5 = Util.getMacShortMd5(macAddress);
+        }
 
         packageHandler = AdjustFactory.getPackageHandler(this, context, dropOfflineActivities);
 
         readActivityState();
     }
 
-    private boolean canInit() {
+    private boolean canInit(String appToken) {
         return checkAppTokenNotNull(appToken)
             && checkAppTokenLength(appToken)
             && checkContext(context)
@@ -255,6 +303,11 @@ public class ActivityHandler extends HandlerThread {
 
     private void startInternal() {
         if (!checkAppTokenNotNull(appToken)) {
+            return;
+        }
+
+        if (activityState != null
+            && !activityState.enabled) {
             return;
         }
 
@@ -271,6 +324,7 @@ public class ActivityHandler extends HandlerThread {
 
             transferSessionPackage();
             activityState.resetSessionAttributes(now);
+            activityState.enabled = this.enabled;
             writeActivityState();
             logger.info("First session");
             return;
@@ -294,18 +348,16 @@ public class ActivityHandler extends HandlerThread {
             transferSessionPackage();
             activityState.resetSessionAttributes(now);
             writeActivityState();
-            logger.debug(String.format(Locale.US,
-                                       "Session %d", activityState.sessionCount));
+            logger.debug("Session %d", activityState.sessionCount);
             return;
         }
 
         // new subsession
         if (lastInterval > SUBSESSION_INTERVAL) {
             activityState.subsessionCount++;
-            logger.info(String.format(Locale.US,
-                                      "Started subsession %d of session %d",
-                                      activityState.subsessionCount,
-                                      activityState.sessionCount));
+            logger.info("Started subsession %d of session %d",
+                    activityState.subsessionCount,
+                    activityState.sessionCount);
         }
         activityState.sessionLength += lastInterval;
         activityState.lastActivity = now;
@@ -319,7 +371,7 @@ public class ActivityHandler extends HandlerThread {
 
         packageHandler.pauseSending();
         stopTimer();
-        updateActivityState();
+        updateActivityState(System.currentTimeMillis());
         writeActivityState();
     }
 
@@ -328,9 +380,14 @@ public class ActivityHandler extends HandlerThread {
             return;
         }
 
-        activityState.createdAt = System.currentTimeMillis();
+        if (!activityState.enabled) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        activityState.createdAt = now;
         activityState.eventCount++;
-        updateActivityState();
+        updateActivityState(now);
 
         injectGeneralAttributes(eventBuilder);
         activityState.injectEventAttributes(eventBuilder);
@@ -338,24 +395,29 @@ public class ActivityHandler extends HandlerThread {
         packageHandler.addPackage(eventPackage);
 
         if (eventBuffering) {
-            logger.info(String.format("Buffered event %s", eventPackage.getSuffix()));
+            logger.info("Buffered event %s", eventPackage.getSuffix());
         } else {
             packageHandler.sendFirstPackage();
         }
 
         writeActivityState();
-        logger.debug(String.format(Locale.US, "Event %d", activityState.eventCount));
+        logger.debug("Event %d", activityState.eventCount);
     }
-
 
     private void trackRevenueInternal(PackageBuilder revenueBuilder) {
         if (!canTrackRevenue(revenueBuilder)) {
             return;
         }
 
-        activityState.createdAt = System.currentTimeMillis();
+        if (!activityState.enabled) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+
+        activityState.createdAt = now;
         activityState.eventCount++;
-        updateActivityState();
+        updateActivityState(now);
 
         injectGeneralAttributes(revenueBuilder);
         activityState.injectEventAttributes(revenueBuilder);
@@ -363,13 +425,84 @@ public class ActivityHandler extends HandlerThread {
         packageHandler.addPackage(eventPackage);
 
         if (eventBuffering) {
-            logger.info(String.format("Buffered revenue %s", eventPackage.getSuffix()));
+            logger.info("Buffered revenue %s", eventPackage.getSuffix());
         } else {
             packageHandler.sendFirstPackage();
         }
 
         writeActivityState();
-        logger.debug(String.format(Locale.US, "Event %d (revenue)", activityState.eventCount));
+        logger.debug("Event %d (revenue)", activityState.eventCount);
+    }
+
+    private void readOpenUrlInternal(Uri url) {
+        if (url == null) {
+            return;
+        }
+
+        String queryString = url.getQuery();
+        if (queryString == null) {
+            return;
+        }
+
+        Map<String, String> adjustDeepLinks = new HashMap<String, String>();
+
+        String[] queryPairs = queryString.split("&");
+        for (String pair : queryPairs) {
+            String[] pairComponents = pair.split("=");
+            if (pairComponents.length != 2) continue;
+
+            String key = pairComponents[0];
+            if (!key.startsWith(ADJUST_PREFIX)) continue;
+
+            String value = pairComponents[1];
+            if (value.length() == 0) continue;
+
+            String keyWOutPrefix = key.substring(ADJUST_PREFIX.length());
+            if (keyWOutPrefix.length() == 0) continue;
+
+            adjustDeepLinks.put(keyWOutPrefix, value);
+        }
+
+        if (adjustDeepLinks.size() == 0) {
+            return;
+        }
+
+        PackageBuilder builder = new PackageBuilder(context);
+        builder.setDeepLinkParameters(adjustDeepLinks);
+        injectGeneralAttributes(builder);
+        ActivityPackage reattributionPackage = builder.buildReattributionPackage();
+        packageHandler.addPackage(reattributionPackage);
+        packageHandler.sendFirstPackage();
+
+        logger.debug("Reattribution %s", adjustDeepLinks.toString());
+    }
+
+    private void runDelegateMain(ResponseData responseData) {
+        if (onFinishedListener == null) return;
+        if (responseData == null) return;
+        onFinishedListener.onFinishedTracking(responseData);
+    }
+
+    private void launchDeepLinkMain(String deepLink) {
+        if (deepLink == null) return;
+
+        Uri location = Uri.parse(deepLink);
+        Intent mapIntent = new Intent(Intent.ACTION_VIEW, location);
+        mapIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        // Verify it resolves
+        PackageManager packageManager = context.getPackageManager();
+        List<ResolveInfo> activities = packageManager.queryIntentActivities(mapIntent, 0);
+        boolean isIntentSafe = activities.size() > 0;
+
+        // Start an activity if it's safe
+        if (!isIntentSafe) {
+            logger.error("Unable to open deep link (%s)", deepLink);
+            return;
+        }
+
+        logger.info("Open deep link (%s)", deepLink);
+        context.startActivity(mapIntent);
     }
 
     private boolean canTrackEvent(PackageBuilder revenueBuilder) {
@@ -384,12 +517,11 @@ public class ActivityHandler extends HandlerThread {
             && revenueBuilder.isValidForRevenue();
     }
 
-    private void updateActivityState() {
+    private void updateActivityState(long now) {
         if (!checkActivityState(activityState)) {
             return;
         }
 
-        long now = System.currentTimeMillis();
         long lastInterval = now - activityState.lastActivity;
         if (lastInterval < 0) {
             logger.error(TIME_TRAVEL);
@@ -415,7 +547,7 @@ public class ActivityHandler extends HandlerThread {
 
             try {
                 activityState = (ActivityState) objectStream.readObject();
-                logger.debug(String.format("Read activity state: %s uuid:%s", activityState, activityState.uuid));
+                logger.debug("Read activity state: %s uuid:%s", activityState, activityState.uuid);
                 return;
             } catch (ClassNotFoundException e) {
                 logger.error("Failed to find activity state class");
@@ -432,7 +564,7 @@ public class ActivityHandler extends HandlerThread {
         } catch (FileNotFoundException e) {
             logger.verbose("Activity state file not found");
         } catch (Exception e) {
-            logger.error(String.format("Failed to open activity state file for reading (%s)", e));
+            logger.error("Failed to open activity state file for reading (%s)", e);
         }
 
         // start with a fresh activity state in case of any exception
@@ -447,7 +579,7 @@ public class ActivityHandler extends HandlerThread {
 
             try {
                 objectStream.writeObject(activityState);
-                logger.verbose(String.format("Wrote activity state: %s", activityState));
+                logger.debug("Wrote activity state: %s", activityState);
             } catch (NotSerializableException e) {
                 logger.error("Failed to serialize activity state");
             } finally {
@@ -455,7 +587,7 @@ public class ActivityHandler extends HandlerThread {
             }
 
         } catch (Exception e) {
-            logger.error(String.format("Failed to open activity state for writing (%s)", e));
+            logger.error("Failed to open activity state for writing (%s)", e);
         }
     }
 
@@ -464,7 +596,7 @@ public class ActivityHandler extends HandlerThread {
     }
 
     private void transferSessionPackage() {
-        PackageBuilder builder = new PackageBuilder();
+        PackageBuilder builder = new PackageBuilder(context);
         injectGeneralAttributes(builder);
         injectReferrer(builder);
         activityState.injectSessionAttributes(builder);
@@ -491,7 +623,7 @@ public class ActivityHandler extends HandlerThread {
             builder.setReferrer(preferences.getString(ReferrerReceiver.REFERRER_KEY, null));
         }
         catch (Exception e) {
-            logger.error(String.format("Failed to inject referrer (%s)", e));
+            logger.error("Failed to inject referrer (%s)", e);
         }
     }
 
@@ -517,9 +649,14 @@ public class ActivityHandler extends HandlerThread {
     }
 
     private void timerFired() {
+        if (null != activityState
+            && !activityState.enabled) {
+            return;
+        }
+
         packageHandler.sendFirstPackage();
 
-        updateActivityState();
+        updateActivityState(System.currentTimeMillis());
         writeActivityState();
     }
 
@@ -537,18 +674,20 @@ public class ActivityHandler extends HandlerThread {
         return result;
     }
 
-    private void processApplicationBundle() {
+    private String processApplicationBundle() {
         Bundle bundle = getApplicationBundle();
         if (null == bundle) {
-            return;
+            return null;
         }
 
-        appToken = bundle.getString("AdjustAppToken");
+        String appToken = bundle.getString("AdjustAppToken");
         setEnvironment(bundle.getString("AdjustEnvironment"));
         setDefaultTracker(bundle.getString("AdjustDefaultTracker"));
         setEventBuffering(bundle.getBoolean("AdjustEventBuffering"));
         logger.setLogLevelString(bundle.getString("AdjustLogLevel"));
         setDropOfflineActivities(bundle.getBoolean("AdjustDropOfflineActivities"));
+
+        return appToken;
     }
 
     private void setEnvironment(String env) {
@@ -565,7 +704,7 @@ public class ActivityHandler extends HandlerThread {
               "PRODUCTION: Adjust is running in Production mode. Use this setting only for the build that you want to publish. Set the environment to `sandbox` if you want to test your app!");
             logger.setLogLevel(Logger.LogLevel.ASSERT);
         } else {
-            logger.Assert(String.format("Malformed environment '%s'", environment));
+            logger.Assert("Malformed environment '%s'", environment);
             logger.setLogLevel(Logger.LogLevel.ASSERT);
             environment = Constants.MALFORMED;
         }
@@ -581,7 +720,7 @@ public class ActivityHandler extends HandlerThread {
     private void setDefaultTracker(String tracker) {
         defaultTracker = tracker;
         if (defaultTracker != null) {
-            logger.info(String.format("Default tracker: '%s'", defaultTracker));
+            logger.info("Default tracker: '%s'", defaultTracker);
         }
     }
 
@@ -601,7 +740,7 @@ public class ActivityHandler extends HandlerThread {
         } catch (NameNotFoundException e) {
             logger.error("ApplicationInfo not found");
         } catch (Exception e) {
-            logger.error(String.format("Failed to get ApplicationBundle (%s)", e));
+            logger.error("Failed to get ApplicationBundle (%s)", e);
         }
         return null;
     }
@@ -637,7 +776,7 @@ public class ActivityHandler extends HandlerThread {
 
     private boolean checkAppTokenLength(String appToken) {
         if (12 != appToken.length()) {
-            logger.error(String.format("Malformed App Token '%s'", appToken));
+            logger.error("Malformed App Token '%s'", appToken);
             return false;
         }
         return true;

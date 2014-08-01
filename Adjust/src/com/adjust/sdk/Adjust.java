@@ -3,7 +3,7 @@
 //  Adjust
 //
 //  Created by Christian Wellenbrock on 2012-10-11.
-//  Copyright (c) 2012-2013 adeven. All rights reserved.
+//  Copyright (c) 2012-2014 adjust GmbH. All rights reserved.
 //  See the file MIT-LICENSE for copying permission.
 //
 
@@ -14,6 +14,7 @@ import static com.adjust.sdk.Constants.NO_ACTIVITY_HANDLER_FOUND;
 import java.util.Map;
 
 import android.app.Activity;
+import android.net.Uri;
 
 /**
  * The main interface to Adjust.
@@ -50,7 +51,8 @@ public class Adjust {
             logger.debug("onPause");
             activityHandler.trackSubsessionEnd();
         } catch (NullPointerException e) {
-            logger.error(NO_ACTIVITY_HANDLER_FOUND);
+            if(logger != null)
+                logger.error(NO_ACTIVITY_HANDLER_FOUND);
         }
     }
 
@@ -58,20 +60,21 @@ public class Adjust {
         try {
             activityHandler.setOnFinishedListener(listener);
         } catch (NullPointerException e) {
-            logger.error(NO_ACTIVITY_HANDLER_FOUND);
+            if(logger != null)
+                logger.error(NO_ACTIVITY_HANDLER_FOUND);
         }
     }
 
     /**
      * Tell Adjust that a particular event has happened.
      * <p/>
-     * In your dashboard at http://adjust.io you can assign a callback URL to each
+     * In your dashboard at http://adjust.com you can assign a callback URL to each
      * event type. That URL will get called every time the event is triggered. On
      * top of that you can pass a set of parameters to the following method that
      * will be forwarded to these callbacks.
      *
      * @param eventToken The Event Token for this kind of event. They are created
-     *                   in the dashboard at http://adjust.io and should be six characters long.
+     *                   in the dashboard at http://adjust.com and should be six characters long.
      * @param parameters An optional dictionary containing the callback parameters.
      *                   Provide key-value-pairs to be forwarded to your callbacks.
      */
@@ -83,7 +86,8 @@ public class Adjust {
         try {
             activityHandler.trackEvent(eventToken, parameters);
         } catch (NullPointerException e) {
-            logger.error(NO_ACTIVITY_HANDLER_FOUND);
+            if(logger != null)
+                logger.error(NO_ACTIVITY_HANDLER_FOUND);
         }
     }
 
@@ -113,17 +117,56 @@ public class Adjust {
         try {
             activityHandler.trackRevenue(amountInCents, eventToken, parameters);
         } catch (NullPointerException e) {
-            logger.error(NO_ACTIVITY_HANDLER_FOUND);
+            if(logger != null)
+                logger.error(NO_ACTIVITY_HANDLER_FOUND);
         }
     }
 
+    /**
+     * Enable or disable the adjust SDK
+     *
+     * @param enabled The flag to enable or disable the adjust SDK
+     */
+    public static void setEnabled(Boolean enabled) {
+        try {
+            activityHandler.setEnabled(enabled);
+        } catch (NullPointerException e) {
+            if (logger != null)
+                logger.error(NO_ACTIVITY_HANDLER_FOUND);
+        }
+    }
+
+    /**
+     * Check if the SDK is enabled or disabled
+     */
+    public static Boolean isEnabled() {
+        try {
+            return activityHandler.isEnabled();
+        } catch (NullPointerException e) {
+            if (logger != null)
+                logger.error(NO_ACTIVITY_HANDLER_FOUND);
+        }
+        return false;
+    }
+
+    public static void appWillOpenUrl(Uri url) {
+        try {
+            activityHandler.readOpenUrl(url);
+        } catch (NullPointerException e) {
+            if (logger != null)
+                logger.error(NO_ACTIVITY_HANDLER_FOUND);
+        }
+
+    }
+
+
     // Special appDidLaunch method used by SDK wrappers such as our Adobe Air SDK.
-    protected static void appDidLaunch(Activity activity, String appToken, String environment, boolean eventBuffering) {
-        activityHandler = new ActivityHandler(activity, appToken, environment, eventBuffering);
+    public static void appDidLaunch(Activity activity, String appToken, String environment, String logLevel, boolean eventBuffering) {
+        activityHandler = new ActivityHandler(activity, appToken, environment, logLevel, eventBuffering);
     }
 
     // Special method used by SDK wrappers such as our Adobe Air SDK.
-    protected static void setSdkPrefix(String sdkPrefix) {
+    public static void setSdkPrefix(String sdkPrefix) {
         activityHandler.setSdkPrefix(sdkPrefix);
     }
 

@@ -3,24 +3,25 @@
 //  Adjust
 //
 //  Created by Christian Wellenbrock on 2013-06-25.
-//  Copyright (c) 2013 adeven. All rights reserved.
+//  Copyright (c) 2013 adjust GmbH. All rights reserved.
 //  See the file MIT-LICENSE for copying permission.
 //
 
 package com.adjust.sdk;
 
-import android.text.TextUtils;
-import android.util.Base64;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+
 import org.json.JSONObject;
+
+import android.content.Context;
+import android.text.TextUtils;
+import android.util.Base64;
 
 public class PackageBuilder {
 
-    private static final String DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'Z";
+    private Context context;
 
     // general
     private String appToken;
@@ -49,10 +50,13 @@ public class PackageBuilder {
     private double              amountInCents;
     private Map<String, String> callbackParameters;
 
-    private static SimpleDateFormat dateFormat;
+    // reattributions
+    private Map<String, String> deepLinkParameters;
 
-    public PackageBuilder()
-    { }
+    public PackageBuilder(Context context)
+    {
+        this.context = context;
+    }
 
     public void setAppToken(String appToken) {
         this.appToken = appToken;
@@ -146,6 +150,10 @@ public class PackageBuilder {
         this.callbackParameters = callbackParameters;
     }
 
+    public void setDeepLinkParameters(Map<String, String> deepLinkParameters) {
+        this.deepLinkParameters = deepLinkParameters;
+    }
+
     public boolean isValidForEvent() {
         if (null == eventToken) {
             Logger logger = AdjustFactory.getLogger();
@@ -158,7 +166,7 @@ public class PackageBuilder {
     public boolean isValidForRevenue() {
         if (amountInCents < 0.0) {
             Logger logger = AdjustFactory.getLogger();
-            logger.error(String.format(Locale.US, "Invalid amount %f", amountInCents));
+            logger.error("Invalid amount %f", amountInCents);
             return false;
         }
         if (eventToken == null) {
@@ -209,10 +217,23 @@ public class PackageBuilder {
         return revenuePackage;
     }
 
+    public ActivityPackage buildReattributionPackage() {
+        Map<String, String> parameters = getDefaultParameters();
+        addMapJson(parameters, "deeplink_parameters", deepLinkParameters);
+
+        ActivityPackage reattributionPackage = getDefaultActivityPackage();
+        reattributionPackage.setPath("/reattribute");
+        reattributionPackage.setActivityKind(ActivityKind.REATTRIBUTION);
+        reattributionPackage.setSuffix("");
+        reattributionPackage.setParameters(parameters);
+
+        return reattributionPackage;
+    }
+
     private boolean isEventTokenValid() {
         if (6 != eventToken.length()) {
             Logger logger = AdjustFactory.getLogger();
-            logger.error(String.format("Malformed Event Token '%s'", eventToken));
+            logger.error("Malformed Event Token '%s'", eventToken);
             return false;
         }
         return true;
@@ -237,6 +258,10 @@ public class PackageBuilder {
         addString(parameters, "android_uuid", uuid);
         addString(parameters, "fb_id", fbAttributionId);
         addString(parameters, "environment", environment);
+        String playAdId = Util.getPlayAdId(context);
+        addString(parameters, "gps_adid", playAdId);
+        Boolean isTrackingEnabled = Util.isPlayTrackingEnabled(context);
+        addBoolean(parameters, "tracking_enabled", isTrackingEnabled);
 
         // session related (used for events as well)
         addInt(parameters, "session_count", sessionCount);
@@ -250,7 +275,7 @@ public class PackageBuilder {
     private void injectEventParameters(Map<String, String> parameters) {
         addInt(parameters, "event_count", eventCount);
         addString(parameters, "event_token", eventToken);
-        addMap(parameters, "params", callbackParameters);
+        addMapBase64(parameters, "params", callbackParameters);
     }
 
     private String getAmountString() {
@@ -293,8 +318,7 @@ public class PackageBuilder {
             return;
         }
 
-        Date date = new Date(value);
-        String dateString = getDateFormat().format(date);
+        String dateString = Util.dateFormat(value);
         addString(parameters, key, dateString);
     }
 
@@ -307,7 +331,7 @@ public class PackageBuilder {
         addInt(parameters, key, durationInSeconds);
     }
 
-    private void addMap(Map<String, String> parameters, String key, Map<String, String> map) {
+    private void addMapBase64(Map<String, String> parameters, String key, Map<String, String> map) {
         if (null == map) {
             return;
         }
@@ -319,10 +343,24 @@ public class PackageBuilder {
         addString(parameters, key, encodedMap);
     }
 
-    private SimpleDateFormat getDateFormat() {
-        if (null == dateFormat) {
-            dateFormat = new SimpleDateFormat(DATE_FORMAT, Locale.US);
+    private void addMapJson(Map<String, String> parameters, String key, Map<String, String> map) {
+        if (null == map) {
+            return;
         }
-        return dateFormat;
+
+        JSONObject jsonObject = new JSONObject(map);
+        String jsonString = jsonObject.toString();
+
+        addString(parameters, key, jsonString);
+    }
+
+    private void addBoolean(Map<String, String> parameters, String key, Boolean value) {
+        if (value == null) {
+            return;
+        }
+
+        int intValue = value? 1 : 0;
+
+        addInt(parameters, key, intValue);
     }
 }

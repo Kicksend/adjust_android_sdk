@@ -1,9 +1,12 @@
 package com.adjust.sdk;
 
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
-import org.json.JSONException;
 import org.json.JSONObject;
+
+import android.text.TextUtils;
 
 /*
  * Information about the result of a tracking attempt
@@ -56,6 +59,26 @@ public class ResponseData {
         return trackerName;
     }
 
+    // network of the tracker
+    public String getNetwork() {
+        return network;
+    }
+
+    // campaign of the tracker
+    public String getCampaign() {
+        return campaign;
+    }
+
+    // adgroup of the tracker
+    public String getAdgroup() {
+        return adgroup;
+    }
+
+    // creative of the tracker
+    public String getCreative() {
+        return creative;
+    }
+
     // internals
 
     private ActivityKind activityKind = ActivityKind.UNKNOWN;
@@ -64,21 +87,29 @@ public class ResponseData {
     private String error;
     private String trackerToken;
     private String trackerName;
+    private String network;
+    private String campaign;
+    private String adgroup;
+    private String creative;
 
-    public static ResponseData fromJson(String jsonString) {
-        try {
-            ResponseData data = new ResponseData();
-            JSONObject jsonObject = new JSONObject(jsonString);
+    public static ResponseData fromJson(JSONObject jsonObject, String jsonString) {
 
-            data.error = jsonObject.optString("error", null);
-            data.trackerToken = jsonObject.optString("tracker_token", null);
-            data.trackerName = jsonObject.optString("tracker_name", null);
-
-            return data;
-        } catch (JSONException e) {
+        if (jsonObject == null) {
             String error = String.format("Failed to parse json response: %s", jsonString.trim());
             return ResponseData.fromError(error);
         }
+
+        ResponseData data = new ResponseData();
+
+        data.error = jsonObject.optString("error", null);
+        data.trackerToken = jsonObject.optString("tracker_token", null);
+        data.trackerName = jsonObject.optString("tracker_name", null);
+        data.network = jsonObject.optString("network", null);
+        data.campaign = jsonObject.optString("campaign", null);
+        data.adgroup = jsonObject.optString("adgroup", null);
+        data.creative = jsonObject.optString("creative", null);
+
+        return data;
     }
 
     public static ResponseData fromError(String error) {
@@ -87,15 +118,22 @@ public class ResponseData {
         return data;
     }
 
+    @Override
     public String toString() {
         return String.format(Locale.US,
-                "[kind:%s success:%b willRetry:%b error:%s trackerToken:%s trackerName:%s]",
+                "[kind:%s success:%b willRetry:%b "
+                + "error:%s trackerToken:%s trackerName:%s "
+                + "network:%s campaign:%s adgroup:%s creative:%s]",
                 getActivityKindString(),
                 success,
                 willRetry,
                 Util.quote(error),
                 trackerToken,
-                Util.quote(trackerName));
+                Util.quote(trackerName),
+                Util.quote(network),
+                Util.quote(campaign),
+                Util.quote(adgroup),
+                Util.quote(creative));
     }
 
     public void setActivityKind(ActivityKind activityKind) {
@@ -108,5 +146,43 @@ public class ResponseData {
 
     public void setWillRetry(boolean willRetry) {
         this.willRetry = willRetry;
+    }
+
+    public Map<String, String> toDic() {
+        Map<String, String> responseDataDic = new HashMap<String, String>();
+
+        responseDataDic.put("activityKind", activityKind.toString());
+        responseDataDic.put("success", success ? "true" : "false");
+        responseDataDic.put("willRetry", willRetry ? "true" : "false");
+
+        if (!TextUtils.isEmpty(error)) {
+            responseDataDic.put("error", error);
+        }
+
+        if (!TextUtils.isEmpty(trackerToken)) {
+            responseDataDic.put("trackerToken", trackerToken);
+        }
+
+        if (!TextUtils.isEmpty(trackerName)) {
+            responseDataDic.put("trackerName", trackerName);
+        }
+
+        if (!TextUtils.isEmpty(network)) {
+            responseDataDic.put("network", network);
+        }
+
+        if (!TextUtils.isEmpty(campaign)) {
+            responseDataDic.put("campaign", campaign);
+        }
+
+        if (!TextUtils.isEmpty(adgroup)) {
+            responseDataDic.put("adgroup", adgroup);
+        }
+
+        if (!TextUtils.isEmpty(creative)) {
+            responseDataDic.put("creative", creative);
+        }
+
+        return responseDataDic;
     }
 }

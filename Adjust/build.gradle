@@ -5,7 +5,7 @@ android {
 
     defaultConfig {
         versionCode 11
-        versionName '3.0.0'
+        versionName '3.5.0'
     }
 
     sourceSets {
@@ -13,12 +13,5 @@ android {
             resources.srcDirs = ['src/main/resources']
         }
     }
-}
 
-task jar(type: Jar) {
-    from android.sourceSets.main.java
-}
-
-task wrapper(type: Wrapper) {
-    gradleVersion = '1.9'
 }

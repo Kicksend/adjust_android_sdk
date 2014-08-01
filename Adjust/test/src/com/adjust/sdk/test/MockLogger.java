@@ -53,33 +53,33 @@ public class MockLogger implements Logger {
     }
 
     @Override
-    public void verbose(String message) {
-        logMessage(message, LogLevel.VERBOSE.getAndroidLogLevel(), "v ");
+    public void verbose(String message, Object ...parameters) {
+        logMessage(String.format(message, parameters), LogLevel.VERBOSE.getAndroidLogLevel(), "v ");
     }
 
     @Override
-    public void debug(String message) {
-        logMessage(message, LogLevel.DEBUG.getAndroidLogLevel(), "d ");
+    public void debug(String message, Object ...parameters) {
+        logMessage(String.format(message, parameters), LogLevel.DEBUG.getAndroidLogLevel(), "d ");
     }
 
     @Override
-    public void info(String message) {
-        logMessage(message, LogLevel.INFO.getAndroidLogLevel(), "i ");
+    public void info(String message, Object ...parameters) {
+        logMessage(String.format(message, parameters), LogLevel.INFO.getAndroidLogLevel(), "i ");
     }
 
     @Override
-    public void warn(String message) {
-        logMessage(message, LogLevel.WARN.getAndroidLogLevel(), "w ");
+    public void warn(String message, Object ...parameters) {
+        logMessage(String.format(message, parameters), LogLevel.WARN.getAndroidLogLevel(), "w ");
     }
 
     @Override
-    public void error(String message) {
-        logMessage(message, LogLevel.ERROR.getAndroidLogLevel(), "e ");
+    public void error(String message, Object ...parameters) {
+        logMessage(String.format(message, parameters), LogLevel.ERROR.getAndroidLogLevel(), "e ");
     }
 
     @Override
-    public void Assert(String message) {
-        logMessage(message, LogLevel.ASSERT.getAndroidLogLevel(), "a ");
+    public void Assert(String message, Object ...parameters) {
+        logMessage(String.format(message, parameters), LogLevel.ASSERT.getAndroidLogLevel(), "a ");
     }
 
     public void test(String message) {
@@ -99,7 +99,7 @@ public class MockLogger implements Logger {
                 return true;
             }
         }
-        test(beginsWith + " is not in " + sList);
+        test(sList + " does not contain " + beginsWith);
         return false;
     }
 
@@ -109,9 +109,5 @@ public class MockLogger implements Logger {
 
     public Boolean containsTestMessage(String beginsWith) {
         return mapContainsMessage(1, beginsWith);
-    }
-
-    public Boolean doesNotContain(String message) {
-        return logBuffer.lastIndexOf(message) == -1;
     }
 }

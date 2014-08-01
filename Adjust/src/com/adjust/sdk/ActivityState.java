@@ -3,7 +3,7 @@
 //  Adjust
 //
 //  Created by Christian Wellenbrock on 2013-06-25.
-//  Copyright (c) 2013 adeven. All rights reserved.
+//  Copyright (c) 2013 adjust GmbH. All rights reserved.
 //  See the file MIT-LICENSE for copying permission.
 //
 
@@ -24,6 +24,7 @@ public class ActivityState implements Serializable {
 
     // persistent data
     protected String uuid;
+    protected Boolean enabled;
 
     // global counters
     protected int eventCount;
@@ -41,6 +42,7 @@ public class ActivityState implements Serializable {
     protected ActivityState() {
         // create UUID for new devices
         uuid = Util.createUuid();
+        enabled = true;
 
         eventCount = 0; // no events yet
         sessionCount = 0; // the first session just started
@@ -71,6 +73,7 @@ public class ActivityState implements Serializable {
         builder.setEventCount(eventCount);
     }
 
+    @Override
     public String toString() {
         return String.format(Locale.US,
                              "ec:%d sc:%d ssc:%d sl:%.1f ts:%.1f la:%s",
@@ -90,7 +93,20 @@ public class ActivityState implements Serializable {
         lastActivity = fields.get("lastActivity", -1l);
         createdAt = fields.get("createdAt", -1l);
         lastInterval = fields.get("lastInterval", -1l);
-        uuid = (String)fields.get("uuid", null);
+
+        // default values for migrating devices
+        uuid = null;
+        enabled = true;
+        // try to read in order of less recent new fields
+        try {
+            uuid = (String)fields.get("uuid", null);
+            enabled = fields.get("enabled", true);
+            // add new fields here
+        } catch (Exception e) {
+            Logger logger = AdjustFactory.getLogger();
+            logger.debug("Unable to read new field in migration device with error (%s)",
+                    e.getMessage());
+        }
 
         // create UUID for migrating devices
         if (uuid == null) {
